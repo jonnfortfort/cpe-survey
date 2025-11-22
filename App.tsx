@@ -1,0 +1,364 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { SURVEY_DATA } from './constants';
+import { SurveyResponse, AiAnalysisResult, QuestionCategory } from './types';
+import AnalysisView from './components/AnalysisView';
+import { analyzeSurvey } from './services/geminiService';
+
+const App: React.FC = () => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [responses, setResponses] = useState<SurveyResponse>({});
+  const [isFinished, setIsFinished] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AiAnalysisResult | null>(null);
+  const [customImages, setCustomImages] = useState<{[key: string]: string}>({});
+  
+  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const currentQuestion = SURVEY_DATA[currentIndex];
+  const isLastQuestion = currentIndex === SURVEY_DATA.length - 1;
+  const currentResponse = responses[currentQuestion.id] || { text: '', selectedTags: [] };
+
+  // Determine if the question is mandatory.
+  const isThematicQuestion = [
+    QuestionCategory.THEME_A,
+    QuestionCategory.THEME_B,
+    QuestionCategory.THEME_C
+  ].includes(currentQuestion.category);
+
+  const isMandatory = !currentQuestion.isInfoOnly && isThematicQuestion;
+
+  const isValid = currentQuestion.isInfoOnly || 
+                  !isMandatory ||
+                  (currentResponse.text && currentResponse.text.trim().length > 0);
+
+  // Auto-focus textarea when slide changes
+  useEffect(() => {
+    if (currentIndex > 0 && !currentQuestion.isInfoOnly && textAreaRef.current) {
+      textAreaRef.current.focus();
+    }
+  }, [currentIndex, currentQuestion.isInfoOnly]);
+
+  const handleNext = () => {
+    if (!isValid && currentIndex !== 0) return; // Intro is always valid
+
+    if (isLastQuestion) {
+      finishSurvey();
+    } else {
+      setCurrentIndex((prev) => prev + 1);
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentIndex > 0) {
+      setCurrentIndex((prev) => prev - 1);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setResponses((prev) => ({
+      ...prev,
+      [currentQuestion.id]: {
+        ...prev[currentQuestion.id],
+        text: e.target.value,
+        selectedTags: prev[currentQuestion.id]?.selectedTags || []
+      }
+    }));
+  };
+
+  const handleTagToggle = (tag: string) => {
+    setResponses((prev) => {
+      const currentResponse = prev[currentQuestion.id] || { text: '', selectedTags: [] };
+      const currentTags = currentResponse.selectedTags || [];
+      
+      let newTags;
+      if (currentTags.includes(tag)) {
+        newTags = currentTags.filter(t => t !== tag);
+      } else {
+        newTags = [...currentTags, tag];
+      }
+
+      return {
+        ...prev,
+        [currentQuestion.id]: {
+          ...currentResponse,
+          selectedTags: newTags
+        }
+      };
+    });
+  };
+
+  const handleImageEditClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (reader.result) {
+          setCustomImages(prev => ({
+            ...prev,
+            [currentQuestion.id]: reader.result as string
+          }));
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+    if (event.target) {
+      event.target.value = '';
+    }
+  };
+
+  const finishSurvey = async () => {
+    setIsFinished(true);
+    setAnalysisLoading(true);
+    const result = await analyzeSurvey(responses, SURVEY_DATA);
+    setAnalysisResult(result);
+    setAnalysisLoading(false);
+  };
+
+  const restartSurvey = () => {
+    setCurrentIndex(0);
+    setResponses({});
+    setIsFinished(false);
+    setAnalysisResult(null);
+    setCustomImages({});
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+     if (e.key === 'Enter' && e.ctrlKey) {
+        if (isValid) handleNext();
+     }
+  };
+
+  const getCategoryColor = (category: string) => {
+    switch(category) {
+      case 'INTRO': return 'bg-slate-900';
+      case 'CONTEXT': return 'bg-blue-50';
+      case 'PRATIQUES': return 'bg-sky-50';
+      case 'DIFFICULTES': return 'bg-orange-50';
+      case 'BESOINS': return 'bg-indigo-50';
+      default: return 'bg-gray-50';
+    }
+  };
+
+  if (isFinished) {
+    return (
+      <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8">
+         <AnalysisView 
+            loading={analysisLoading} 
+            result={analysisResult} 
+            responses={responses}
+            onRestart={restartSurvey} 
+         />
+      </div>
+    );
+  }
+
+  // --- LAYOUT FOR HOME PAGE (INDEX 0) ---
+  if (currentIndex === 0) {
+    const bgImage = customImages[currentQuestion.id] || currentQuestion.imageUrl;
+    return (
+      <div className="relative h-screen w-full overflow-hidden bg-slate-900">
+         {/* Background Image */}
+         <div className="absolute inset-0">
+            <img 
+              src={bgImage} 
+              alt="Background" 
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-black/60" />
+         </div>
+
+         {/* Image Edit Button */}
+         <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileChange} 
+            accept="image/*" 
+            className="hidden" 
+          />
+         <button 
+            onClick={handleImageEditClick}
+            className="absolute top-6 right-6 p-3 bg-white/20 hover:bg-white/30 rounded-full text-white backdrop-blur-md transition-all z-20 shadow-lg"
+            title="Changer l'image de fond"
+         >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+            </svg>
+         </button>
+
+         {/* Hero Content */}
+         <div className="relative z-10 h-full flex flex-col items-center justify-center px-4 text-center max-w-5xl mx-auto">
+            <div className="mb-8">
+              <span className="px-4 py-1.5 bg-white/10 backdrop-blur-sm text-sky-300 border border-sky-500/30 rounded-full text-sm font-bold tracking-widest uppercase">
+                {currentQuestion.tags.join(' • ')}
+              </span>
+            </div>
+            
+            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-white mb-6 leading-tight drop-shadow-xl">
+               {currentQuestion.text}
+            </h1>
+            
+            <p className="text-xl text-slate-200 max-w-2xl mb-12 font-light leading-relaxed">
+               Une application de sondage interactive pour recueillir vos expériences sur les sorties hivernales en CPE.
+            </p>
+
+            <button
+              onClick={handleNext}
+              className="px-10 py-4 bg-white text-slate-900 text-lg font-bold rounded-full hover:bg-sky-500 hover:text-white transition-all transform hover:scale-105 shadow-[0_0_30px_-5px_rgba(255,255,255,0.4)] flex items-center"
+            >
+              Commencer
+              <svg className="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" /></svg>
+            </button>
+         </div>
+      </div>
+    );
+  }
+
+  // --- LAYOUT FOR OTHER PAGES (INDEX > 0) ---
+  return (
+    <div className={`min-h-screen flex items-center justify-center p-4 md:p-6 transition-colors duration-700 ${getCategoryColor(currentQuestion.category)}`}>
+      <div className="max-w-3xl w-full bg-white rounded-3xl shadow-xl overflow-hidden flex flex-col relative transition-all duration-500">
+        
+        {/* Progress Bar (Integrated) */}
+        <div className="w-full bg-slate-100 h-1.5">
+          <div 
+            className="bg-sky-500 h-full transition-all duration-500 ease-out"
+            style={{ width: `${(currentIndex / SURVEY_DATA.length) * 100}%` }}
+          />
+        </div>
+
+        <div className="p-8 md:p-12 flex flex-col flex-grow">
+          
+          {/* Header info */}
+          <div className="flex items-center justify-between mb-6">
+             <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded-full tracking-widest uppercase">
+               {currentQuestion.category}
+             </span>
+             <div className="flex gap-2">
+                {currentQuestion.tags.map(tag => (
+                  <span key={tag} className="text-slate-400 text-xs font-medium">#{tag}</span>
+                ))}
+             </div>
+          </div>
+
+          {/* Question Text / Section Title */}
+          <h1 className="text-2xl md:text-3xl font-bold text-slate-800 mb-8 leading-snug">
+            {currentQuestion.text}
+            {!currentQuestion.isInfoOnly && isMandatory && <span className="text-rose-500 ml-1" title="Requis">*</span>}
+          </h1>
+
+          {/* Content Area */}
+          <div className="flex-grow space-y-6">
+             {currentQuestion.isInfoOnly ? (
+               // Context/Info Slide (Section Cover)
+               <div className="bg-sky-50/80 border-l-4 border-sky-500 p-8 rounded-r-2xl">
+                 <div className="flex items-start">
+                   <svg className="w-8 h-8 text-sky-600 mr-4 mt-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                   </svg>
+                   <div>
+                     {/* Use the placeholder field to display Objective/Definition text */}
+                     <p className="text-sky-900 text-xl font-semibold leading-relaxed">
+                        {currentQuestion.placeholder || "Veuillez cliquer sur Suivant pour continuer."}
+                     </p>
+                     <p className="text-sky-600/80 mt-4 text-sm uppercase font-bold tracking-wide">
+                        Cliquez sur "Suivant" pour commencer cette section
+                     </p>
+                   </div>
+                 </div>
+               </div>
+             ) : (
+               // Interactive Slide
+               <>
+                 {/* Tags */}
+                 {currentQuestion.answerTags && (
+                   <div className="flex flex-wrap gap-2">
+                     {currentQuestion.answerTags.map(tag => {
+                        const isSelected = currentResponse.selectedTags.includes(tag);
+                        return (
+                           <button
+                             key={tag}
+                             onClick={() => handleTagToggle(tag)}
+                             className={`px-4 py-2 rounded-full text-sm font-semibold transition-all border-2 ${
+                               isSelected 
+                               ? 'bg-sky-600 text-white border-sky-600 shadow-md' 
+                               : 'bg-white text-slate-500 border-slate-100 hover:border-sky-200 hover:bg-sky-50'
+                             }`}
+                           >
+                             {tag}
+                           </button>
+                        )
+                     })}
+                   </div>
+                 )}
+
+                 {/* Text Input */}
+                 <div className="relative group">
+                    <textarea
+                      ref={textAreaRef}
+                      value={currentResponse.text}
+                      onChange={handleInputChange}
+                      onKeyDown={handleKeyDown}
+                      placeholder={currentQuestion.placeholder}
+                      className={`w-full h-48 p-5 text-lg bg-slate-50 border-2 rounded-2xl outline-none transition-all resize-none
+                        ${!isValid && isMandatory
+                          ? 'border-rose-100 focus:border-rose-400 focus:bg-white' 
+                          : 'border-slate-100 focus:border-sky-500 focus:bg-white focus:shadow-md'
+                        }
+                      `}
+                    />
+                    <div className="absolute bottom-4 right-4 pointer-events-none">
+                       {isValid && (
+                         <span className="flex items-center text-emerald-500 text-sm font-bold bg-emerald-50 px-2 py-1 rounded">
+                           <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                           OK
+                         </span>
+                       )}
+                    </div>
+                 </div>
+                 
+                 {!isValid && isMandatory && (
+                    <p className="text-rose-500 text-sm font-medium animate-pulse">
+                       * Une réponse écrite est requise pour cette question.
+                    </p>
+                 )}
+               </>
+             )}
+          </div>
+
+          {/* Footer / Navigation */}
+          <div className="mt-10 pt-6 border-t border-slate-100 flex justify-between items-center">
+            <button
+              onClick={handlePrevious}
+              disabled={currentIndex === 0} // Should not happen in this view, but safe to keep
+              className="flex items-center text-slate-400 font-semibold hover:text-slate-700 transition-colors"
+            >
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              Retour
+            </button>
+            
+            <button
+              onClick={handleNext}
+              disabled={!isValid}
+              className={`flex items-center px-8 py-3 rounded-xl font-bold shadow-lg transition-all transform ${
+                isValid 
+                ? 'bg-slate-900 text-white hover:bg-sky-600 hover:-translate-y-1 hover:shadow-xl' 
+                : 'bg-slate-100 text-slate-300 cursor-not-allowed shadow-none'
+              }`}
+            >
+              {isLastQuestion ? 'Terminer' : 'Suivant'}
+              <svg className="w-5 h-5 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default App;
