@@ -13,8 +13,9 @@
     "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true
   },
   "include": ["./**/*.ts", "./**/*.tsx"],
   "exclude": ["node_modules"]
