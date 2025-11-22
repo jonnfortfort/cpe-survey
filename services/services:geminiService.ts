@@ -8,13 +8,14 @@ export const analyzeSurvey = async (
   questions: Question[]
 ): Promise<AiAnalysisResult> => {
   
+  // Fallback for local development or when no API key is present
   if (!process.env.API_KEY) {
-    console.error("API Key not found");
+    console.warn("API Key not found. Using simulation mode.");
     return {
       personaTitle: "Mode Démo",
-      summary: "Clé API manquante. Ceci est une réponse de démonstration. (Configurez votre clé API sur Vercel pour activer l'IA)",
-      topPainPoints: ["Manque de clé API", "Données non analysées"],
-      suggestion: "Ajoutez votre clé API pour voir la magie opérer.",
+      summary: "Clé API manquante. Ceci est une réponse de démonstration générée localement. (Configurez votre clé API sur Vercel pour activer la vraie IA)",
+      topPainPoints: ["Manque de clé API", "Données non analysées par IA", "Simulation locale"],
+      suggestion: "Ajoutez votre clé API dans les paramètres Vercel pour voir la magie opérer.",
       sentimentScore: 50,
       categoryScores: [
         { label: "Sécurité", score: 5 },
@@ -93,10 +94,10 @@ export const analyzeSurvey = async (
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
     return {
-      personaTitle: "Profil Non Analysé",
-      summary: "Une erreur est survenue lors de l'analyse des résultats.",
-      topPainPoints: ["Erreur de connexion"],
-      suggestion: "Veuillez réessayer plus tard.",
+      personaTitle: "Erreur d'Analyse",
+      summary: "Une erreur est survenue lors de la communication avec l'IA.",
+      topPainPoints: ["Erreur technique"],
+      suggestion: "Veuillez réessayer.",
       sentimentScore: 0,
       categoryScores: []
     };
