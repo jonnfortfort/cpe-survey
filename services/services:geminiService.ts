@@ -1,65 +1,102 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AiAnalysisResult, SurveyResponse, Question } from '../types';
 
-export const analyzeSurvey = async (responses: SurveyResponse, questions: Question[]): Promise<AiAnalysisResult> => {
+export const analyzeSurvey = async (
+  responses: SurveyResponse,
+  questions: Question[]
+): Promise<AiAnalysisResult> => {
   
-  // --- 本地模拟算法 (当没有 API Key 时使用) ---
   if (!process.env.API_KEY) {
-    console.log("Utilisation de l'analyse locale (Pas de clé API)");
-    
-    // Calculer le score de sentiment basé sur les tags sélectionnés
-    let sentimentScore = 75; // Départ neutre/positif
-    const negativeKeywords = ['Difficile', 'Froid', 'Chute', 'Stress', 'Cri', 'Conflit', 'Fatigue', 'Risque', 'Manque'];
-    const positiveKeywords = ['Plaisir', 'Jeu', 'Nature', 'Rire', 'Calme', 'Autonomie', 'Collaboration'];
-    
-    let painPoints: string[] = [];
-    let ideas: string[] = [];
-
-    Object.values(responses).forEach(r => {
-      r.selectedTags.forEach(tag => {
-        if (negativeKeywords.some(k => tag.includes(k))) sentimentScore -= 5;
-        if (positiveKeywords.some(k => tag.includes(k))) sentimentScore += 5;
-      });
-      if (r.text.length > 10 && painPoints.length < 3) painPoints.push(r.text.substring(0, 40) + "...");
-    });
-    
-    // Bornes
-    sentimentScore = Math.max(10, Math.min(95, sentimentScore));
-
+    console.error("API Key not found");
     return {
-      personaTitle: "Profil Éducateur(trice) Engagé(e)",
-      summary: "L'analyse des réponses montre une personne soucieuse de la sécurité mais désireuse d'offrir des expériences riches aux enfants malgré les défis logistiques.",
-      topPainPoints: painPoints.length > 0 ? painPoints : ["Gestion de l'habillage", "Manque de rangement", "Froid intense"],
-      suggestion: "Améliorer l'ergonomie du vestiaire pour réduire le stress des transitions.",
-      sentimentScore: sentimentScore,
+      personaTitle: "Mode Démo",
+      summary: "Clé API manquante. Ceci est une réponse de démonstration.",
+      topPainPoints: ["Manque de clé API", "Données non analysées"],
+      suggestion: "Ajoutez votre clé API pour voir la magie opérer.",
+      sentimentScore: 50,
       categoryScores: [
-        { label: "Sécurité", score: Math.floor(Math.random() * 4) + 3 },
-        { label: "Organisation", score: Math.floor(Math.random() * 5) + 5 },
-        { label: "Équipement", score: Math.floor(Math.random() * 4) + 4 }
+        { label: "Sécurité", score: 5 },
+        { label: "Organisation", score: 5 },
+        { label: "Matériel", score: 5 }
       ]
     };
   }
 
-  // --- VRAIE IA (Si vous mettez une clé dans Vercel) ---
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+  // Format inputs for the prompt
   let transcript = "";
   questions.forEach(q => {
     if (!q.isInfoOnly) {
-      const r = responses[q.id];
-      transcript += `Q: ${q.text}\nReponse: ${r?.text || ''} [Tags: ${r?.selectedTags?.join(',')}]\n\n`;
+      const response = responses[q.id];
+      const answerText = response?.text || "Pas de réponse textuelle";
+      const tagsList = response?.selectedTags?.length 
+        ? response.selectedTags.join(", ") 
+        : "Aucun tag sélectionné";
+
+      transcript += `Question (${q.category}): ${q.text}\n`;
+      transcript += `Tags choisis: [${tagsList}]\n`;
+      transcript += `Détails: ${answerText}\n\n`;
     }
   });
+
+  const prompt = `
+    Tu es un expert en recherche UX spécialisé dans la petite enfance.
+    Voici les réponses d'une éducatrice en CPE concernant les sorties hivernales.
+    
+    Tâche : Analyse les réponses pour générer un profil, des points de friction, et des DONNÉES QUANTITATIVES pour des graphiques.
+    
+    Pour 'sentimentScore' : Évalue le moral global de l'éducatrice face à l'hiver (0 = Épuisée/Négative, 100 = Enthousiaste/Positive).
+    Pour 'categoryScores' : Évalue l'intensité des PROBLÈMES dans ces catégories (0 = Aucun problème, 10 = Problème Critique/Majeur).
+    
+    TRANSCRIPT:
+    ${transcript}
+  `;
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: `Analyse ces réponses d'éducatrice CPE. Génère un JSON avec personaTitle, summary, topPainPoints, suggestion, sentimentScore (0-100), categoryScores (label, score 0-10). \n\n ${transcript}`,
-      config: { responseMimeType: "application/json" }
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            personaTitle: { type: Type.STRING },
+            summary: { type: Type.STRING },
+            topPainPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+            suggestion: { type: Type.STRING },
+            sentimentScore: { type: Type.INTEGER, description: "0 to 100" },
+            categoryScores: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  label: { type: Type.STRING, enum: ["Sécurité", "Organisation", "Équipement"] },
+                  score: { type: Type.INTEGER, description: "0 to 10 severity of issues" }
+                }
+              }
+            }
+          },
+          required: ["personaTitle", "summary", "topPainPoints", "suggestion", "sentimentScore", "categoryScores"]
+        }
+      }
     });
-    return JSON.parse(response.text || "{}") as AiAnalysisResult;
-  } catch (e) {
+
+    const text = response.text;
+    if (!text) throw new Error("No response from Gemini");
+
+    return JSON.parse(text) as AiAnalysisResult;
+
+  } catch (error) {
+    console.error("Gemini Analysis Error:", error);
     return {
-       personaTitle: "Erreur", summary: "Erreur analyse", topPainPoints: [], suggestion: "", sentimentScore: 0, categoryScores: []
+      personaTitle: "Profil Non Analysé",
+      summary: "Une erreur est survenue lors de l'analyse des résultats.",
+      topPainPoints: ["Erreur de connexion"],
+      suggestion: "Veuillez réessayer plus tard.",
+      sentimentScore: 0,
+      categoryScores: []
     };
   }
 };
