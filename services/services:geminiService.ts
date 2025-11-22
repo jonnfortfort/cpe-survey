@@ -1,3 +1,5 @@
+declare const process: any;
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { AiAnalysisResult, SurveyResponse, Question } from '../types';
 
@@ -10,7 +12,7 @@ export const analyzeSurvey = async (
     console.error("API Key not found");
     return {
       personaTitle: "Mode Démo",
-      summary: "Clé API manquante. Ceci est une réponse de démonstration.",
+      summary: "Clé API manquante. Ceci est une réponse de démonstration. (Configurez votre clé API sur Vercel pour activer l'IA)",
       topPainPoints: ["Manque de clé API", "Données non analysées"],
       suggestion: "Ajoutez votre clé API pour voir la magie opérer.",
       sentimentScore: 50,
